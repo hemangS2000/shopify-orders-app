@@ -1,23 +1,16 @@
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
+const mongoose = require('mongoose');
 
-// Create or open a database file
-const db = new sqlite3.Database(path.resolve(__dirname, 'orders.db'), (err) => {
-  if (err) {
-    console.error('Error opening database', err.message);
-  } else {
-    console.log('✅ Connected to SQLite database.');
+const connectDB = async () => {
+  try {
+    await mongoose.connect(process.env.MONGO_URI, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true
+    });
+    console.log('MongoDB connected');
+  } catch (err) {
+    console.error(err.message);
+    process.exit(1);
   }
-});
+};
 
-// Create the orders table if it doesn't exist
-db.serialize(() => {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS orders (
-      id TEXT PRIMARY KEY,
-      json_data TEXT
-    )
-  `);
-});
-
-module.exports = db;
+module.exports = connectDB;
