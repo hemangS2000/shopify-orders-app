@@ -28,8 +28,8 @@
 
     function loadOrders() {
       fetch('/api/orders')
-        .then(r => r.json())
-        .then(orders => {
+  .then(r => r.json())
+  .then(orders => {
           const html = `
             <table>
               <thead>...</thead>

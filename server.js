@@ -1,15 +1,18 @@
 const express = require("express");
 const bodyParser = require("body-parser");
 const crypto = require("crypto");
-const db = require("./db");
+const connectDB = require("./db");
+const Order = require("./orders");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const shopifySecret = process.env.SHOPIFY_WEBHOOK_SECRET;
 
-const shopifySecret = process.env.SHOPIFY_WEBHOOK_SECRET || "your_shopify_secret";
+// Connect to MongoDB
+connectDB();
 
 app.use(bodyParser.raw({ type: "application/json" }));
-app.use(express.static("public")); // Serve static files
+app.use(express.static("public"));
 
 // Webhook verification middleware
 const verifyShopifyWebhook = (req, res, buf) => {
@@ -24,17 +27,19 @@ const verifyShopifyWebhook = (req, res, buf) => {
   }
 };
 
-// Webhook handler
-app.post("/webhook", (req, res) => {
+// Updated Webhook handler (MongoDB version)
+app.post("/webhook", async (req, res) => {
   try {
     verifyShopifyWebhook(req, res, req.body);
     const payload = JSON.parse(req.body.toString("utf8"));
     
-    // Store in database
-    const stmt = db.prepare("INSERT OR REPLACE INTO orders (id, data) VALUES (?, ?)");
-    stmt.run(payload.id, JSON.stringify(payload));
+    // Create new order document
+    const order = new Order({
+      ...payload,
+      id: payload.id.toString()
+    });
     
-    // Notify SSE clients
+    await order.save();
     notifyClients();
     res.status(200).send("Webhook received");
   } catch (error) {
@@ -43,20 +48,23 @@ app.post("/webhook", (req, res) => {
   }
 });
 
-// API endpoints
-app.get("/api/orders", (req, res) => {
-  const orders = db.prepare("SELECT data FROM orders ORDER BY created_at DESC LIMIT 20").all();
-  res.json(orders.map(o => JSON.parse(o.data)));
+// Updated API endpoints
+app.get("/api/orders", async (req, res) => {
+  try {
+    const orders = await Order.find().sort({ createdAt: -1 }).limit(20);
+    res.json(orders);
+  } catch (error) {
+    res.status(500).send("Server error");
+  }
 });
 
-app.get("/api/orders/:id", (req, res) => {
-  const order = db.prepare("SELECT data FROM orders WHERE id = ?")
-    .get(req.params.id);
-  
-  if (order) {
-    res.json(JSON.parse(order.data));
-  } else {
-    res.status(404).send("Order not found");
+app.get("/api/orders/:id", async (req, res) => {
+  try {
+    const order = await Order.findOne({ id: req.params.id });
+    if (!order) return res.status(404).send("Order not found");
+    res.json(order);
+  } catch (error) {
+    res.status(500).send("Server error");
   }
 });
 
