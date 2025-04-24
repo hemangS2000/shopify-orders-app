@@ -3,7 +3,11 @@
 <head>
   <title>Shopify Orders</title>
   <style>
-    /* Same styles as before */
+    body { font-family: sans-serif; padding: 20px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background-color: #f2f2f2; }
+    tr:nth-child(even) { background-color: #f9f9f9; }
     .json-modal {
       position: fixed;
       top: 20px;
@@ -14,6 +18,7 @@
       max-width: 400px;
       max-height: 80vh;
       overflow: auto;
+      z-index: 1000;
     }
   </style>
 </head>
@@ -28,15 +33,28 @@
 
     function loadOrders() {
       fetch('/api/orders')
-  .then(r => r.json())
-  .then(orders => {
+        .then(r => r.json())
+        .then(orders => {
           const html = `
             <table>
-              <thead>...</thead>
+              <thead>
+                <tr>
+                  <th>Order ID</th>
+                  <th>Order Number</th>
+                  <th>Customer</th>
+                  <th>Email</th>
+                  <th>Phone</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
               <tbody>
                 ${orders.map(order => `
                   <tr>
-                    <!-- Your existing columns -->
+                    <td>${order.id || ''}</td>
+                    <td>${order.order_number || ''}</td>
+                    <td>${order.shipping_address?.name || ''}</td>
+                    <td>${order.customer?.email || ''}</td>
+                    <td>${order.shipping_address?.phone || ''}</td>
                     <td>
                       <button onclick="showOrderDetails('${order.id}')">
                         Show Details
@@ -47,7 +65,8 @@
               </tbody>
             </table>`;
           document.getElementById('orders-container').innerHTML = html;
-        });
+        })
+        .catch(err => console.error('Error loading orders:', err));
     }
 
     function showOrderDetails(orderId) {
@@ -56,15 +75,20 @@
         .then(order => {
           modal.style.display = 'block';
           modal.innerHTML = `
+            <h3>Order Details</h3>
             <pre>${JSON.stringify({
               name: order.shipping_address?.name,
               email: order.customer?.email,
               phone: order.shipping_address?.phone,
-              shipping_code: order.shipping_lines?.[0]?.code
+              shipping_code: order.shipping_lines?.[0]?.code,
+              address: `${order.shipping_address?.address1 || ''} ${order.shipping_address?.address2 || ''}`.trim(),
+              city: order.shipping_address?.city,
+              country: order.shipping_address?.country
             }, null, 2)}</pre>
             <button onclick="modal.style.display='none'">Close</button>
           `;
-        });
+        })
+        .catch(err => console.error('Error loading order details:', err));
     }
 
     // SSE listener
