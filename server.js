@@ -1,30 +1,28 @@
 require('dotenv').config();
-const express  = require('express');
-const crypto   = require('crypto');
+const express = require('express');
 const Database = require('better-sqlite3');
-const path     = require('path');
-
+const path = require('path');
+const crypto = require('crypto');
 const app = express();
 
-// —————— MIDDLEWARE ——————
+// Setup raw body capturing
+const rawBodySaver = (req, res, buf) => {
+  if (buf && buf.length) {
+    req.rawBody = buf.toString('utf8');
+  }
+};
 
-// 1) RAW parser for Shopify webhooks ONLY
-app.use('/webhook', express.raw({ type: 'application/json' }));
-
-// 2) JSON parser for everything else
-app.use(express.json());
-
-// 3) Serve static files from /public
+// Use middleware to capture raw body
+app.use(express.json({ verify: rawBodySaver }));
 app.use(express.static('public'));
 
-
-// —————— DATABASE SETUP ——————
-
-const dbPath = process.env.NODE_ENV === 'production'
-  ? '/tmp/orders.db'
+// Database setup
+const dbPath = process.env.NODE_ENV === 'production' 
+  ? '/tmp/orders.db' 
   : path.resolve(__dirname, 'orders.db');
 const db = new Database(dbPath);
 
+// Create table
 db.prepare(`
   CREATE TABLE IF NOT EXISTS orders (
     id TEXT PRIMARY KEY,
@@ -39,38 +37,26 @@ db.prepare(`
   )
 `).run();
 
-
-// —————— SHOPIFY HMAC VERIFICATION ——————
-
-function verifyWebhook(req, res, next) {
+// ✅ Shopify Webhook HMAC verification
+const verifyWebhook = (req, res, next) => {
   const hmacHeader = req.headers['x-shopify-hmac-sha256'];
-  const hash = crypto
+  const generatedHash = crypto
     .createHmac('sha256', process.env.SHOPIFY_WEBHOOK_SECRET)
-    .update(req.body)              // raw Buffer from express.raw()
+    .update(req.rawBody, 'utf8')
     .digest('base64');
 
-  if (hash !== hmacHeader) {
-    console.error('❌ Invalid webhook signature');
-    return res.status(401).send('Bad signature');
+  if (generatedHash !== hmacHeader) {
+    console.error('❌ Invalid HMAC signature');
+    return res.status(401).send('Invalid signature');
   }
-
-  // parse the verified raw body into JSON for your handlers
-  try {
-    req.body = JSON.parse(req.body.toString('utf8'));
-  } catch (e) {
-    console.error('❌ JSON parse error:', e);
-    return res.status(400).send('Bad JSON');
-  }
-
   next();
-}
+};
 
-
-// —————— WEBHOOK ENDPOINT ——————
-
+// ✅ Webhook endpoint
 app.post('/webhook', verifyWebhook, (req, res) => {
   try {
     const order = req.body;
+    console.log(`📦 Webhook received for Order #${order.order_number}`);
 
     const orderData = {
       id: order.id,
@@ -80,50 +66,35 @@ app.post('/webhook', verifyWebhook, (req, res) => {
       phone: order.shipping_address?.phone,
       address: `${order.shipping_address?.address1}, ${order.shipping_address?.city}`,
       products: order.line_items.map(item => item.title).join(', '),
-      raw_json: JSON.stringify(order)
+      raw_json: JSON.stringify(order),
     };
 
     db.prepare(`
       INSERT OR REPLACE INTO orders 
       (id, order_number, customer_name, email, phone, address, products, raw_json)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      orderData.id,
-      orderData.order_number,
-      orderData.customer_name,
-      orderData.email,
-      orderData.phone,
-      orderData.address,
-      orderData.products,
-      orderData.raw_json
-    );
+    `).run(...Object.values(orderData));
 
-    console.log(`✅ Order ${orderData.order_number} saved`);
+    console.log(`✅ Saved Order #${order.order_number}`);
     res.status(200).send('Webhook processed');
   } catch (err) {
     console.error('❌ Webhook error:', err);
-    res.status(500).send('Error processing order');
+    res.status(500).send('Internal Server Error');
   }
 });
 
-
-// —————— API ENDPOINTS ——————
-
+// API to view saved orders
 app.get('/api/orders', (req, res) => {
   try {
     const orders = db.prepare('SELECT * FROM orders ORDER BY created_at DESC').all();
     res.json(orders);
   } catch (err) {
-    console.error('❌ Database error:', err);
     res.status(500).send('Database error');
   }
 });
 
-
-// —————— START SERVER ——————
-
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📦 Database: ${dbPath}`);
+  console.log(`📦 Database path: ${dbPath}`);
 });
