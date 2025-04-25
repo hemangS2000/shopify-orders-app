@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Shopify Metafields Proxy</title>
+  <style>
+    body { font-family: sans-serif; padding: 2rem; }
+    input, textarea { width: 100%; margin: .5rem 0; }
+  </style>
+</head>
+<body>
+  <h1>Fetch Product Metafields</h1>
+  <label>Product ID (numeric):</label>
+  <input id="productId" placeholder="e.g. 8774958317825" />
+  <button id="fetchBtn">Fetch</button>
+  <h2>Response</h2>
+  <textarea id="output" rows="15"></textarea>
+
+  <script>
+    document.getElementById('fetchBtn').onclick = async () => {
+      const id = document.getElementById('productId').value.trim();
+      const res = await fetch('/proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productId: id })
+      });
+      const data = await res.json();
+      document.getElementById('output').value = JSON.stringify(data, null, 2);
+    };
+  </script>
+</body>
+</html>
