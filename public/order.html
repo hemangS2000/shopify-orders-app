@@ -1,99 +1,99 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+  <meta charset="UTF-8">
   <title>Shopify Orders</title>
   <style>
-    body { font-family: sans-serif; padding: 20px; }
-    table { border-collapse: collapse; width: 100%; margin-top: 20px; }
-    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    /* Keep existing styles */
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ddd; padding: 8px; }
     th { background-color: #f2f2f2; }
-    tr:nth-child(even) { background-color: #f9f9f9; }
-    .json-modal {
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      background: white;
-      padding: 20px;
-      border: 1px solid #ccc;
-      max-width: 400px;
-      max-height: 80vh;
-      overflow: auto;
-      z-index: 1000;
-    }
+    button { padding: 6px 12px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    button:hover { background-color: #0056b3; }
+    .no-shipping { background-color: #ffdddd; }
+    .home-delivery { color: #666; font-style: italic; }
   </style>
 </head>
 <body>
-  <h2>Latest Shopify Orders</h2>
-  <div id="orders-container"></div>
-  <div id="json-modal" class="json-modal" style="display: none;"></div>
+  <h1>Shopify Orders</h1>
+  <table>
+    <thead>
+      <tr>
+        <th>Source</th>
+        <th>Order #</th>
+        <th>Customer Info</th>
+        <th>Item Count</th>
+        <th>Pickup Action</th>
+      </tr>
+    </thead>
+    <tbody id="orders-table-body"></tbody>
+  </table>
 
   <script>
-    const modal = document.getElementById('json-modal');
-    let eventSource;
+    let currentOrders = [];
 
-    function loadOrders() {
-      fetch('/api/orders')
-        .then(r => r.json())
-        .then(orders => {
-          const html = `
-            <table>
-              <thead>
-                <tr>
-                  <th>Order ID</th>
-                  <th>Order Number</th>
-                  <th>Customer</th>
-                  <th>Email</th>
-                  <th>Phone</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${orders.map(order => `
-                  <tr>
-                    <td>${order.id || ''}</td>
-                    <td>${order.order_number || ''}</td>
-                    <td>${order.shipping_address?.name || ''}</td>
-                    <td>${order.customer?.email || ''}</td>
-                    <td>${order.shipping_address?.phone || ''}</td>
-                    <td>
-                      <button onclick="showOrderDetails('${order.id}')">
-                        Show Details
-                      </button>
-                    </td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>`;
-          document.getElementById('orders-container').innerHTML = html;
-        })
-        .catch(err => console.error('Error loading orders:', err));
+    async function loadOrders() {
+      try {
+        const res = await fetch('/api/orders');
+        currentOrders = await res.json();
+        renderOrders();
+      } catch (err) {
+        console.error('Error loading orders:', err);
+      }
     }
 
-    function showOrderDetails(orderId) {
-      fetch(`/api/orders/${orderId}`)
-        .then(r => r.json())
-        .then(order => {
-          modal.style.display = 'block';
-          modal.innerHTML = `
-            <h3>Order Details</h3>
-            <pre>${JSON.stringify({
-              name: order.shipping_address?.name,
-              email: order.customer?.email,
-              phone: order.shipping_address?.phone,
-              shipping_code: order.shipping_lines?.[0]?.code,
-              address: `${order.shipping_address?.address1 || ''} ${order.shipping_address?.address2 || ''}`.trim(),
-              city: order.shipping_address?.city,
-              country: order.shipping_address?.country
-            }, null, 2)}</pre>
-            <button onclick="modal.style.display='none'">Close</button>
-          `;
-        })
-        .catch(err => console.error('Error loading order details:', err));
+    const eventSource = new EventSource('/events');
+    eventSource.onmessage = () => {
+      loadOrders();
+    };
+
+    function renderOrders() {
+      const tbody = document.getElementById('orders-table-body');
+      tbody.innerHTML = currentOrders.map((order, index) => {
+        const requiresShipping = order.line_items.some(item => item.requires_shipping);
+        const shippingMethod = order.shipping_lines?.[0]?.title || 'No shipping';
+        const isPickupPoint = shippingMethod === 'Standard Pickup-Point';
+        
+        const rowClass = requiresShipping ? '' : 'no-shipping';
+        
+        let pickupActionContent;
+        if (!requiresShipping) {
+          pickupActionContent = 'Digital product';
+        } else if (isPickupPoint) {
+          pickupActionContent = `<button onclick='sendToApi(${JSON.stringify(order)}, "pickup-${index}")'>Send to API</button>`;
+        } else {
+          pickupActionContent = `<span class="home-delivery">${shippingMethod}</span>`;
+        }
+
+        return `
+          <tr class="${rowClass}">
+            <td>${order.source_name}</td>
+            <td>${order.order_number}</td>
+            <td>
+              ${order.shipping_address?.name || 'N/A'}<br>
+              ${order.customer.email}<br>
+              ${order.shipping_address?.phone || 'N/A'}<br>
+              ${order.shipping_address ? [
+                order.shipping_address.address1,
+                order.shipping_address.address2,
+                order.shipping_address.zip,
+                order.shipping_address.city,
+                order.shipping_address.country
+              ].filter(Boolean).map(item => `${item}<br>`).join('') : 'No shipping address'}
+            </td>
+            <td>${order.line_items.length}</td>
+            <td id="pickup-${index}">
+              ${pickupActionContent}
+            </td>
+          </tr>
+        `;
+      }).join('');
     }
 
-    // SSE listener
-    eventSource = new EventSource('/events');
-    eventSource.onmessage = () => loadOrders();
+    // Keep existing sendToApi function
+    async function sendToApi(order, elementId) {
+      // ... (keep your existing implementation) ...
+    }
 
     // Initial load
     loadOrders();

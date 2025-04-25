@@ -22,21 +22,28 @@ const verifyShopifyWebhook = (req, res, buf) => {
     .update(buf, "utf8")
     .digest("base64");
 
-  if (!crypto.timingSafeEqual(Buffer.from(generatedHash), Buffer.from(hmacHeader || ""))) {
+  if (!hmacHeader || !crypto.timingSafeEqual(Buffer.from(generatedHash), Buffer.from(hmacHeader))) {
     throw new Error("Invalid signature");
   }
 };
 
-// Updated Webhook handler (MongoDB version)
+// Webhook handler
 app.post("/webhook", async (req, res) => {
   try {
     verifyShopifyWebhook(req, res, req.body);
     const payload = JSON.parse(req.body.toString("utf8"));
     
+    // Check for existing order
+    const existingOrder = await Order.findOne({ id: payload.id.toString() });
+    if (existingOrder) {
+      return res.status(200).send("Order already exists");
+    }
+
     // Create new order document
     const order = new Order({
       ...payload,
-      id: payload.id.toString()
+      id: payload.id.toString(),
+      createdAt: new Date(payload.created_at)
     });
     
     await order.save();
@@ -48,7 +55,7 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-// Updated API endpoints
+// API endpoints
 app.get("/api/orders", async (req, res) => {
   try {
     const orders = await Order.find().sort({ createdAt: -1 }).limit(20);
@@ -68,25 +75,35 @@ app.get("/api/orders/:id", async (req, res) => {
   }
 });
 
-
 // SSE setup
 const clients = new Set();
+
 function notifyClients() {
-  clients.forEach(client => client.res.write(`data: update\n\n`));
+  clients.forEach(client => {
+    try {
+      client.res.write(`data: update\n\n`);
+    } catch (err) {
+      console.error("Client connection error:", err);
+    }
+  });
 }
 
 app.get("/events", (req, res) => {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
-  
+  res.setHeader("Access-Control-Allow-Origin", "*");
+
   const client = { id: Date.now(), res };
   clients.add(client);
-  
-  req.on("close", () => clients.delete(client));
+
+  req.on("close", () => {
+    clients.delete(client);
+    console.log(`Client ${client.id} disconnected`);
+  });
 });
 
-// Serve UI from public directory
+// Serve UI
 app.get("/orders", (req, res) => {
   res.sendFile("orders.html", { root: "public" });
 });
