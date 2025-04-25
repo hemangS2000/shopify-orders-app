@@ -4,13 +4,21 @@
   <meta charset="UTF-8">
   <title>Shopify Orders</title>
   <style>
-    /* Existing styles remain */
+    /* Existing table styles */
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ddd; padding: 8px; }
+    th { background-color: #f2f2f2; }
+    .no-shipping { background-color: #ffdddd; }
+    .home-delivery { color: #666; font-style: italic; }
+    
+    /* Clickable item count */
     .clickable {
       cursor: pointer;
       color: #007bff;
       text-decoration: underline;
     }
 
+    /* Modal styles */
     .modal {
       display: none;
       position: fixed;
@@ -23,10 +31,10 @@
 
     .modal-content {
       background-color: white;
-      margin: 5% auto;
+      margin: 2% auto;
       padding: 20px;
       width: 80%;
-      max-width: 600px;
+      max-width: 800px;
       position: relative;
     }
 
@@ -51,7 +59,21 @@
   </style>
 </head>
 <body>
-  <!-- Existing table structure remains -->
+  <h1>Shopify Orders</h1>
+  <table>
+    <thead>
+      <tr>
+        <th>Source</th>
+        <th>Order #</th>
+        <th>Customer Info</th>
+        <th>Item Count</th>
+        <th>Pickup Action</th>
+      </tr>
+    </thead>
+    <tbody id="orders-table-body"></tbody>
+  </table>
+
+  <!-- Product Details Modal -->
   <div id="productModal" class="modal">
     <div class="modal-content">
       <span class="close">&times;</span>
@@ -60,15 +82,81 @@
   </div>
 
   <script>
-    // Add modal handling
+    let currentOrders = [];
     const modal = document.getElementById("productModal");
     const span = document.querySelector(".close");
 
+    // Event listeners
     span.onclick = () => modal.style.display = "none";
     window.onclick = (event) => {
       if (event.target === modal) modal.style.display = "none";
     }
 
+    // Initial load
+    async function loadOrders() {
+      try {
+        const res = await fetch('/api/orders');
+        currentOrders = await res.json();
+        renderOrders();
+      } catch (err) {
+        console.error('Error loading orders:', err);
+      }
+    }
+
+    // SSE connection
+    const eventSource = new EventSource('/events');
+    eventSource.onmessage = () => loadOrders();
+
+    // Render orders
+    function renderOrders() {
+      const tbody = document.getElementById('orders-table-body');
+      tbody.innerHTML = currentOrders.map((order, index) => {
+        const requiresShipping = order.line_items.some(item => item.requires_shipping);
+        const shippingMethod = order.shipping_lines?.[0]?.title || 'No shipping';
+        const isPickupPoint = shippingMethod === 'Standard Pickup-Point';
+        
+        const rowClass = requiresShipping ? '' : 'no-shipping';
+        
+        let pickupActionContent;
+        if (!requiresShipping) {
+          pickupActionContent = 'Digital product';
+        } else if (isPickupPoint) {
+          pickupActionContent = `<button onclick='sendToApi(${JSON.stringify(order)}, "pickup-${index}")'>Send to API</button>`;
+        } else {
+          pickupActionContent = `<span class="home-delivery">${shippingMethod}</span>`;
+        }
+
+        return `
+          <tr class="${rowClass}">
+            <td>${order.source_name}</td>
+            <td>${order.order_number}</td>
+            <td>
+              ${order.shipping_address?.name || 'N/A'}<br>
+              ${order.customer.email}<br>
+              ${order.shipping_address?.phone || 'N/A'}<br>
+              ${order.shipping_address ? [
+                order.shipping_address.address1,
+                order.shipping_address.address2,
+                order.shipping_address.zip,
+                order.shipping_address.city,
+                order.shipping_address.country
+              ].filter(Boolean).map(item => `${item}<br>`).join('') : 'No shipping address'}
+            </td>
+            <td>
+              <span class="clickable" 
+                    onclick="showProductDetails(${JSON.stringify(order).replace(/</g, '\\u003c')})">
+                ${order.line_items.length}
+              </span>
+            </td>
+            <td id="pickup-${index}">
+              ${pickupActionContent}
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    // Product details handler
     async function showProductDetails(order) {
       try {
         const productIds = [...new Set(order.line_items.map(item => item.product_id))];
@@ -78,14 +166,16 @@
           body: JSON.stringify({ productIds })
         });
 
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const productsData = await response.json();
         showModal(productsData);
       } catch (err) {
         console.error('Error:', err);
-        alert('Failed to load product details');
+        alert('Failed to load product details. Check console for details.');
       }
     }
 
+    // Show modal with product data
     function showModal(productsData) {
       const content = productsData.map((productData, index) => {
         const product = productData.data?.product;
@@ -118,25 +208,8 @@
       modal.style.display = "block";
     }
 
-    // Update renderOrders to make item count clickable
-    function renderOrders() {
-      const tbody = document.getElementById('orders-table-body');
-      tbody.innerHTML = currentOrders.map((order, index) => {
-        // Existing rendering logic
-        return `
-          <tr class="${rowClass}">
-            <!-- Other columns -->
-            <td>
-              <span class="clickable" 
-                    onclick="showProductDetails(${JSON.stringify(order).replace(/</g, '\\u003c')})">
-                ${order.line_items.length}
-              </span>
-            </td>
-            <!-- Remaining columns -->
-          </tr>
-        `;
-      }).join('');
-    }
+    // Initial load
+    loadOrders();
   </script>
 </body>
 </html>

@@ -1,6 +1,7 @@
 const express = require("express");
 const bodyParser = require("body-parser");
 const crypto = require("crypto");
+const cors = require("cors");
 const connectDB = require("./db");
 const Order = require("./orders");
 
@@ -8,14 +9,23 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const shopifySecret = process.env.SHOPIFY_WEBHOOK_SECRET;
 
-// Connect to MongoDB
+// CORS Configuration
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production' 
+    ? process.env.FRONTEND_URL 
+    : 'http://localhost:3000',
+  optionsSuccessStatus: 200
+}));
+
+// Database connection
 connectDB();
 
+// Middleware
 app.use(bodyParser.raw({ type: "application/json" }));
 app.use(express.json());
 app.use(express.static("public"));
 
-// Webhook verification middleware
+// Webhook verification
 const verifyShopifyWebhook = (req, res, buf) => {
   const hmacHeader = req.get("X-Shopify-Hmac-Sha256");
   const generatedHash = crypto
@@ -69,12 +79,8 @@ app.post("/api/product-details", async (req, res) => {
         body: JSON.stringify({
           query: `query ($id: ID!) {
             product(id: $id) {
-              images(first: 1) {
-                edges { node { originalSrc } }
-              }
-              metafields(first: 10) {
-                edges { node { namespace, key, value } }
-              }
+              images(first: 1) { edges { node { originalSrc } } }
+              metafields(first: 10) { edges { node { namespace, key, value } } }
             }
           }`,
           variables: { id: `gid://shopify/Product/${productId}` }
@@ -100,16 +106,6 @@ app.get("/api/orders", async (req, res) => {
   }
 });
 
-app.get("/api/orders/:id", async (req, res) => {
-  try {
-    const order = await Order.findOne({ id: req.params.id });
-    if (!order) return res.status(404).send("Order not found");
-    res.json(order);
-  } catch (error) {
-    res.status(500).send("Server error");
-  }
-});
-
 // SSE setup
 const clients = new Set();
 
@@ -127,7 +123,6 @@ app.get("/events", (req, res) => {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
-  res.setHeader("Access-Control-Allow-Origin", "*");
 
   const client = { id: Date.now(), res };
   clients.add(client);
