@@ -4,6 +4,7 @@ const crypto = require("crypto");
 const cors = require("cors");
 const connectDB = require("./db");
 const Order = require("./orders");
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -65,11 +66,17 @@ app.post("/webhook", async (req, res) => {
 // Product details endpoint
 app.post("/api/product-details", async (req, res) => {
   try {
+    console.log("Received product IDs:", req.body.productIds);
     const { productIds } = req.body;
     const accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
     const storeUrl = process.env.SHOPIFY_STORE_URL;
 
     const results = await Promise.all(productIds.map(async (productId) => {
+      if (!productId || isNaN(productId)) {
+        console.error("Invalid product ID:", productId);
+        return { error: `Invalid product ID: ${productId}` };
+      }
+
       const response = await fetch(`${storeUrl}/admin/api/2025-04/graphql.json`, {
         method: 'POST',
         headers: {
@@ -81,18 +88,23 @@ app.post("/api/product-details", async (req, res) => {
             product(id: $id) {
               images(first: 1) { edges { node { originalSrc } } }
               metafields(first: 10) { edges { node { namespace, key, value } } }
-            }
-          }`,
+            }`,
           variables: { id: `gid://shopify/Product/${productId}` }
         })
       });
-      return response.json();
+      
+      const data = await response.json();
+      console.log("Shopify response for", productId, ":", data);
+      return data;
     }));
 
     res.json(results);
   } catch (error) {
     console.error("Product details error:", error);
-    res.status(500).json({ error: "Failed to fetch product details" });
+    res.status(500).json({ 
+      error: "Failed to fetch product details",
+      message: error.message 
+    });
   }
 });
 
