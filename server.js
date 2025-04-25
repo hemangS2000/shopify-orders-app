@@ -12,6 +12,7 @@ const shopifySecret = process.env.SHOPIFY_WEBHOOK_SECRET;
 connectDB();
 
 app.use(bodyParser.raw({ type: "application/json" }));
+app.use(express.json());
 app.use(express.static("public"));
 
 // Webhook verification middleware
@@ -33,13 +34,9 @@ app.post("/webhook", async (req, res) => {
     verifyShopifyWebhook(req, res, req.body);
     const payload = JSON.parse(req.body.toString("utf8"));
     
-    // Check for existing order
     const existingOrder = await Order.findOne({ id: payload.id.toString() });
-    if (existingOrder) {
-      return res.status(200).send("Order already exists");
-    }
+    if (existingOrder) return res.status(200).send("Order exists");
 
-    // Create new order document
     const order = new Order({
       ...payload,
       id: payload.id.toString(),
@@ -52,6 +49,44 @@ app.post("/webhook", async (req, res) => {
   } catch (error) {
     console.error("Webhook error:", error);
     res.status(401).send("Unauthorized");
+  }
+});
+
+// Product details endpoint
+app.post("/api/product-details", async (req, res) => {
+  try {
+    const { productIds } = req.body;
+    const accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
+    const storeUrl = process.env.SHOPIFY_STORE_URL;
+
+    const results = await Promise.all(productIds.map(async (productId) => {
+      const response = await fetch(`${storeUrl}/admin/api/2025-04/graphql.json`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Shopify-Access-Token': accessToken
+        },
+        body: JSON.stringify({
+          query: `query ($id: ID!) {
+            product(id: $id) {
+              images(first: 1) {
+                edges { node { originalSrc } }
+              }
+              metafields(first: 10) {
+                edges { node { namespace, key, value } }
+              }
+            }
+          }`,
+          variables: { id: `gid://shopify/Product/${productId}` }
+        })
+      });
+      return response.json();
+    }));
+
+    res.json(results);
+  } catch (error) {
+    console.error("Product details error:", error);
+    res.status(500).json({ error: "Failed to fetch product details" });
   }
 });
 
